@@ -1,0 +1,54 @@
+---
+########################################################################################
+
+########################################################################################
+# Mount Test
+########################################################################################
+- name: Test mount {{ accessMode }} volumes for {{ prefix }}
+  k8s:
+    state: present
+    namespace: "{{ namespace }}"
+    definition: "{{ lookup('template', item.name) | from_yaml }}"
+  loop:
+     - name: create-volume.yaml.j2
+     - name: mount-job.yaml.j2
+  vars:
+    accessMode: ReadWriteOnce
+
+- name: Verify mount completed for RWO
+  k8s_info:
+    name: "{{ prefix }}-mount-job-{{ accessMode|lower}}"
+    namespace: "{{ namespace }}"
+    kind: Job
+  register: job_status
+  until: job_status.resources[0].status.succeeded is defined and job_status.resources[0].status.succeeded == 1
+  retries: 20
+  delay: 10
+  vars:
+    accessMode: ReadWriteOnce    
+
+- name: Test mount {{ accessMode }} volumes for {{ prefix }}
+  k8s:
+    state: present
+    namespace: "{{ namespace }}"
+    definition: "{{ lookup('template', item.name) | from_yaml }}"
+  loop:
+     - name: create-volume.yaml.j2
+     - name: mount-job.yaml.j2
+  vars:
+    accessMode: ReadWriteMany     
+
+- name: Verify mount completed for RWX
+  k8s_info:
+    name: "{{ prefix }}-mount-job-{{ accessMode|lower}}"
+    namespace: "{{ namespace }}"
+    kind: Job
+  register: job_status
+  until: job_status.resources[0].status.succeeded is defined and job_status.resources[0].status.succeeded == 1
+  retries: 20
+  delay: 10
+  vars:
+    accessMode: ReadWriteMany   
+
+- debug: 
+    msg: "######################## MOUNT TESTS PASSED #################################"

@@ -1,0 +1,26 @@
+---
+
+- hosts: localhost
+  gather_facts: no
+
+  tasks:
+
+  - name: Run simple mount test 
+    include_role: 
+      name: storage-readiness 
+      tasks_from: mount-test.yaml 
+
+  - name: Run sequential RW tests
+    include_role:
+      name: storage-readiness
+      tasks_from: sequential-rw.yaml
+
+  - name: Run parallel rw single thread tests 
+    include_role:
+      name: storage-readiness
+      tasks_from: parallel-rw-single-thread.yaml 
+
+  - name: Run parallel rw multi thread tests 
+    include_role:
+      name: storage-readiness
+      tasks_from: parallel-rw-multi-thread.yaml 

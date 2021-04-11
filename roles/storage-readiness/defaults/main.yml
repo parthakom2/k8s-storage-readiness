@@ -1,0 +1,6 @@
+storageClass: "managed-nfs-storage"
+storageSize: "1Gi"
+prefix: "readiness"
+namespace: "readiness"
+options: ""
+backoffLimit: 5

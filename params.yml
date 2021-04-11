@@ -1,0 +1,3 @@
+storageClass: <required>
+storageSize: "5Gi"
+namespace: <required>

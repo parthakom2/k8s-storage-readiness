@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "{{ prefix }}-consumer-job-{{ accessMode|lower}}-{{ type }}"
+spec:
+  backoffLimit: {{ backoffLimit }}
+  template:
+    metadata:
+      name: consumer-job
+    spec:
+      containers:
+      - name: consumer-job
+        image: centos
+        imagePullPolicy: "IfNotPresent"
+        env:
+          - name: FILE_NAME
+            value: "/tmp/data/sample.txt"
+        command:
+        - "/bin/sh"
+        - "-ec"
+        - |
+          /tmp/consume.sh
+        volumeMounts:
+        - name: tmp-store
+          mountPath: /tmp/data
+        - name: consume-conf
+          mountPath: /tmp/consume.sh
+          subPath: consume.sh
+      volumes:
+      - name: tmp-store
+        persistentVolumeClaim:
+          claimName: "{{ prefix }}-{{ accessMode|lower }}"
+      - name: consume-conf
+        configMap:
+          defaultMode: 0755
+          name: consumer-nocheck-cm
+      restartPolicy: Never

@@ -1,0 +1,256 @@
+---
+########################################################################################
+
+########################################################################################
+# Mount Test
+########################################################################################
+- name: Test mount {{ accessMode }} volumes for {{ prefix }}
+  k8s:
+    state: present
+    namespace: "{{ namespace }}"
+    definition: "{{ lookup('template', item.name) | from_yaml }}"
+  loop:
+     - name: create-volume.yaml.j2
+     - name: mount-job.yaml.j2
+  vars:
+    accessMode: ReadWriteOnce
+
+- name: Verify mount completed for RWO
+  k8s_info:
+    name: "{{ prefix }}-mount-job-{{ accessMode|lower}}"
+    namespace: "{{ namespace }}"
+    kind: Job
+  register: job_status
+  until: job_status.resources[0].status.succeeded is defined and job_status.resources[0].status.succeeded == 1
+  retries: 20
+  delay: 10
+  vars:
+    accessMode: ReadWriteOnce    
+
+- name: Test mount {{ accessMode }} volumes for {{ prefix }}
+  k8s:
+    state: present
+    namespace: "{{ namespace }}"
+    definition: "{{ lookup('template', item.name) | from_yaml }}"
+  loop:
+     - name: create-volume.yaml.j2
+     - name: mount-job.yaml.j2
+  vars:
+    accessMode: ReadWriteMany     
+
+- name: Verify mount completed for RWX
+  k8s_info:
+    name: "{{ prefix }}-mount-job-{{ accessMode|lower}}"
+    namespace: "{{ namespace }}"
+    kind: Job
+  register: job_status
+  until: job_status.resources[0].status.succeeded is defined and job_status.resources[0].status.succeeded == 1
+  retries: 20
+  delay: 10
+  vars:
+    accessMode: ReadWriteMany   
+
+########################################################################################
+# Sequential Write/Read
+########################################################################################
+- name: Set config maps
+  k8s:
+    state: present
+    namespace: "{{ namespace }}"
+    definition: "{{ lookup('template', item.name) | from_yaml }}"
+  loop:
+     - name: producer-cm.yaml.j2
+     - name: consumer-cm.yaml.j2
+
+- name: Sequential read/write {{ accessMode }} volumes for {{ prefix }}
+  k8s:
+    state: present
+    namespace: "{{ namespace }}"
+    definition: "{{ lookup('template', item.name) | from_yaml }}"
+    wait: yes
+    wait_timeout: 180
+    wait_condition:
+      type: Complete
+      status: "True"
+  loop:
+     - name: producer.yaml.j2
+     - name: consumer.yaml.j2
+  vars:
+    accessMode: ReadWriteMany
+    type: sequential
+
+########################################################################################
+# Parallel Write/Read single thread
+########################################################################################
+
+- block:
+
+  - name: Set config maps
+    k8s:
+      state: present
+      namespace: "{{ namespace }}"
+      definition: "{{ lookup('template', item.name) | from_yaml }}"
+    loop:
+       - name: producer-cm.yaml.j2
+       - name: consumer-nocheck-cm.yaml.j2
+    vars:
+      options: "oflag=dsync conv=notrunc"
+
+  - name: Parallel read/write  {{ accessMode }} volumes for {{ prefix }}
+    k8s:
+      state: present
+      namespace: "{{ namespace }}"
+      definition: "{{ lookup('template', item.name) | from_yaml }}"
+    loop:
+       - name: producer.yaml.j2
+    vars:
+      accessMode: ReadWriteMany     
+      type: parallel
+
+  - name: Pause for 5 seconds before reading
+    pause:
+      seconds: 5
+
+  - name: Parallel concurrency read while producer is running 
+    k8s:
+      state: present
+      namespace: "{{ namespace }}"
+      definition: "{{ lookup('template', item.name) | from_yaml }}"
+      wait: yes
+      wait_timeout: 20
+      wait_condition:
+        type: Complete
+        status: "True"
+    loop:
+      - name: consumer-nocheck.yaml.j2
+    vars:
+      accessMode: ReadWriteMany     
+      type: parallel-nocheck
+      backoffLimit: 1
+
+  - name: Assert that producer is still running
+    k8s_info:
+      kind: Job
+      name: "{{ prefix }}-producer-job-{{ accessMode|lower}}-{{ type }}"
+      namespace: "{{ namespace }}"
+    register: job_status
+    vars:
+      accessMode: ReadWriteMany     
+      type: parallel
+
+  - name: Fail if producer job is already completed
+    fail:
+      msg: "Producer job ran too soon, test may be inaccurate"
+    when: job_status.resources[0].status.active is defined and job_status.resources[0].status.active != 1
+
+  - name: Wait until producer job is done
+    k8s_info:
+      name: "{{ prefix }}-producer-job-{{ accessMode|lower}}-{{ type }}"
+      namespace: "{{ namespace }}"
+      kind: Job
+    register: job_status
+    until: job_status.resources[0].status.succeeded is defined and job_status.resources[0].status.succeeded == 1
+    retries: 20
+    delay: 10
+    vars:
+      accessMode: ReadWriteMany     
+      type: parallel
+
+- name: Parallel read  {{ accessMode }} volumes for {{ prefix }}
+  k8s:
+    state: present
+    namespace: "{{ namespace }}"
+    definition: "{{ lookup('template', item.name) | from_yaml }}"
+    wait: yes
+    wait_timeout: 20
+    wait_condition:
+      type: Complete
+      status: "True"
+  loop:
+     - name: consumer.yaml.j2
+  vars:
+    accessMode: ReadWriteMany     
+    type: parallel-final
+
+
+########################################################################################
+# Parallel Write/Read multiple thread across nodes
+########################################################################################
+
+- name: Get node count
+  k8s_info:
+    kind: Nodes
+    label_selectors:
+      - node-role.kubernetes.io/worker = 
+  register: node_list
+
+- set_fact:
+     node_count: "{{ node_list|length }}"
+
+- name: Parallel write from separate nodes
+  k8s:
+    state: present
+    namespace: "{{ namespace }}"
+    definition: "{{ lookup('template', item.name) | from_yaml }}"
+    wait: yes
+    wait_timeout: 200
+    wait_condition:
+      type: Complete
+      status: "True"
+  loop:
+     - name: parallel-producer.yaml.j2
+  vars:
+    accessMode: ReadWriteMany     
+    type: parallel-multi
+    threads: "{{ node_count }}"
+
+
+- name: Parallel write no wait from separate nodes
+  k8s:
+    state: present
+    namespace: "{{ namespace }}"
+    definition: "{{ lookup('template', item.name) | from_yaml }}"
+  loop:
+     - name: parallel-producer.yaml.j2
+  vars:
+    accessMode: ReadWriteMany     
+    type: parallel-multi-no-wait
+    threads: "{{ node_count }}"
+
+- name: Parallel read no wait from separate nodes
+  k8s:
+    state: present
+    namespace: "{{ namespace }}"
+    definition: "{{ lookup('template', item.name) | from_yaml }}"
+  loop:
+     - name: parallel-consumer.yaml.j2
+  vars:
+    accessMode: ReadWriteMany     
+    type: parallel-multi
+    threads: "{{ node_count }}"
+
+- name: Wait Until parallel producer job is done
+  k8s_info:
+    name: "{{ prefix }}-producer-job-{{ type }}"
+    namespace: "{{ namespace }}"
+    kind: Job
+  register: job_status
+  until: job_status.resources[0].status.succeeded is defined and job_status.resources[0].status.succeeded == (node_count|int)
+  retries: 20
+  delay: 10
+  vars:
+    accessMode: ReadWriteMany     
+    type: parallel-multi-no-wait
+
+- name: Wait Until parallel consumer job is done
+  k8s_info:
+    name: "{{ prefix }}-consumer-job-{{ type }}"
+    namespace: "{{ namespace }}"
+    kind: Job
+  register: job_status
+  until: job_status.resources[0].status.succeeded is defined and job_status.resources[0].status.succeeded == (node_count|int)
+  retries: 20
+  delay: 10
+  vars:
+    accessMode: ReadWriteMany     
+    type: parallel-multi
