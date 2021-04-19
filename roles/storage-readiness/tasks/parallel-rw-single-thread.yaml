@@ -48,7 +48,7 @@
       namespace: "{{ namespace }}"
       definition: "{{ lookup('template', item.name) | from_yaml }}"
       wait: yes
-      wait_timeout: 25
+      wait_timeout: 20
       wait_condition:
         type: Complete
         status: "True"
@@ -57,7 +57,7 @@
     vars:
       accessMode: ReadWriteMany     
       type: parallel-nocheck
-      backoffLimit: 1
+      backoffLimit: 6
 
   - name: Assert that producer is still running
     k8s_info:
