@@ -42,17 +42,13 @@
       accessMode: ReadWriteMany     
       type: parallel
 
-  - name: Pause for 5 seconds before reading
-    pause:
-      seconds: 5
-
   - name: Parallel concurrency read while producer is running 
     k8s:
       state: present
       namespace: "{{ namespace }}"
       definition: "{{ lookup('template', item.name) | from_yaml }}"
       wait: yes
-      wait_timeout: 20
+      wait_timeout: 25
       wait_condition:
         type: Complete
         status: "True"
